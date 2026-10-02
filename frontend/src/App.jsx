@@ -1,122 +1,447 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { useState } from "react";
+
+import Board from "./components/Board";
+import Toolbar from "./components/Toolbar";
+import NotesPanel from "./components/NotesPanel";
+
+import "./App.css";
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [activeTool, setActiveTool] =
+    useState("pen");
+
+  const [penType, setPenType] =
+    useState("normal");
+
+  const [penSize, setPenSize] =
+    useState(3);
+
+  const [eraserSize, setEraserSize] =
+    useState(20);
+
+  const [selectedShape, setSelectedShape] =
+    useState("rectangle");
+
+  const [notesOpen, setNotesOpen] =
+    useState(false);
+
+  const [canvas, setCanvas] =
+    useState(null);
+
+  const [drawingPreview, setDrawingPreview] =
+    useState(null);
+
+  const [convertedText, setConvertedText] =
+    useState("");
+
+  const [ocrLoading, setOcrLoading] =
+    useState(false);
+
+  const [ocrError, setOcrError] =
+    useState("");
+
+
+  /* =========================================
+     NOTES
+  ========================================= */
+
+  const toggleNotes = () => {
+    setNotesOpen(
+      (previous) => !previous
+    );
+  };
+
+
+  const closeNotes = () => {
+    setNotesOpen(false);
+  };
+
+
+  /* =========================================
+     PREPARE DRAWING FOR OCR
+  ========================================= */
+
+  const prepareDrawing = () => {
+    if (!canvas) {
+      return null;
+    }
+
+    const width = canvas.width;
+    const height = canvas.height;
+
+    const sourceCanvas =
+      document.createElement("canvas");
+
+    sourceCanvas.width = width;
+    sourceCanvas.height = height;
+
+    const sourceContext =
+      sourceCanvas.getContext("2d");
+
+    sourceContext.drawImage(
+      canvas,
+      0,
+      0
+    );
+
+    const imageData =
+      sourceContext.getImageData(
+        0,
+        0,
+        width,
+        height
+      );
+
+    const pixels =
+      imageData.data;
+
+    let minX = width;
+    let minY = height;
+    let maxX = 0;
+    let maxY = 0;
+
+    let foundPixel = false;
+
+
+    /* =====================================
+       FIND NON-WHITE PIXELS
+    ===================================== */
+
+    for (
+      let y = 0;
+      y < height;
+      y++
+    ) {
+      for (
+        let x = 0;
+        x < width;
+        x++
+      ) {
+        const index =
+          (y * width + x) * 4;
+
+        const red =
+          pixels[index];
+
+        const green =
+          pixels[index + 1];
+
+        const blue =
+          pixels[index + 2];
+
+        const isDark =
+          red < 245 ||
+          green < 245 ||
+          blue < 245;
+
+        if (isDark) {
+          foundPixel = true;
+
+          minX = Math.min(
+            minX,
+            x
+          );
+
+          minY = Math.min(
+            minY,
+            y
+          );
+
+          maxX = Math.max(
+            maxX,
+            x
+          );
+
+          maxY = Math.max(
+            maxY,
+            y
+          );
+        }
+      }
+    }
+
+
+    if (!foundPixel) {
+      return null;
+    }
+
+
+    /* =====================================
+       ADD PADDING
+    ===================================== */
+
+    const padding = 60;
+
+    minX =
+      Math.max(
+        0,
+        minX - padding
+      );
+
+    minY =
+      Math.max(
+        0,
+        minY - padding
+      );
+
+    maxX =
+      Math.min(
+        width - 1,
+        maxX + padding
+      );
+
+    maxY =
+      Math.min(
+        height - 1,
+        maxY + padding
+      );
+
+
+    const cropWidth =
+      maxX - minX + 1;
+
+    const cropHeight =
+      maxY - minY + 1;
+
+
+    /* =====================================
+       UPSCALE
+    ===================================== */
+
+    const scale = 3;
+
+    const processedCanvas =
+      document.createElement(
+        "canvas"
+      );
+
+    processedCanvas.width =
+      cropWidth * scale;
+
+    processedCanvas.height =
+      cropHeight * scale;
+
+    const processedContext =
+      processedCanvas.getContext(
+        "2d"
+      );
+
+
+    processedContext.fillStyle =
+      "#ffffff";
+
+    processedContext.fillRect(
+      0,
+      0,
+      processedCanvas.width,
+      processedCanvas.height
+    );
+
+
+    processedContext.imageSmoothingEnabled =
+      true;
+
+    processedContext.drawImage(
+      sourceCanvas,
+
+      minX,
+      minY,
+      cropWidth,
+      cropHeight,
+
+      0,
+      0,
+      cropWidth * scale,
+      cropHeight * scale
+    );
+
+
+    return processedCanvas.toDataURL(
+      "image/png"
+    );
+  };
+
+
+  /* =========================================
+     CONVERT HANDWRITING
+  ========================================= */
+
+  const convertHandwriting =
+    async () => {
+
+      if (!canvas) {
+        return;
+      }
+
+      setOcrError("");
+
+      setConvertedText("");
+
+      setOcrLoading(true);
+
+
+      try {
+
+        const image =
+          prepareDrawing();
+
+        if (!image) {
+          setOcrError(
+            "There is no handwriting on the board."
+          );
+
+          return;
+        }
+
+
+        setDrawingPreview(image);
+
+
+        const response =
+          await fetch(
+            "http://localhost:5000/api/ocr/recognize",
+            {
+              method: "POST",
+
+              headers: {
+                "Content-Type":
+                  "application/json",
+              },
+
+              body: JSON.stringify({
+                image,
+              }),
+            }
+          );
+
+
+        const data =
+          await response.json();
+
+
+        if (!response.ok) {
+          throw new Error(
+            data.message ||
+            "OCR request failed"
+          );
+        }
+
+
+        if (
+          !data.text ||
+          !data.text.trim()
+        ) {
+          setConvertedText(
+            "No text could be recognized."
+          );
+
+          return;
+        }
+
+
+        setConvertedText(
+          data.text.trim()
+        );
+
+      } catch (error) {
+
+        console.error(
+          "Handwriting conversion error:",
+          error
+        );
+
+        setOcrError(
+          error.message ||
+          "Failed to convert handwriting."
+        );
+
+      } finally {
+
+        setOcrLoading(false);
+
+      }
+    };
+
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <div className="smartboard">
 
-      <div className="ticks"></div>
+      <Board
+        activeTool={activeTool}
+        penType={penType}
+        penSize={penSize}
+        eraserSize={eraserSize}
+        selectedShape={selectedShape}
+        onCanvasReady={setCanvas}
+      />
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+      <NotesPanel
+        isOpen={notesOpen}
+        onClose={closeNotes}
+
+        drawingPreview={
+          drawingPreview
+        }
+
+        convertedText={
+          convertedText
+        }
+
+        setConvertedText={
+          setConvertedText
+        }
+
+        onConvert={
+          convertHandwriting
+        }
+
+        ocrLoading={
+          ocrLoading
+        }
+
+        ocrError={
+          ocrError
+        }
+      />
+
+
+      <Toolbar
+        activeTool={activeTool}
+        setActiveTool={
+          setActiveTool
+        }
+
+        penType={penType}
+        setPenType={
+          setPenType
+        }
+
+        penSize={penSize}
+        setPenSize={
+          setPenSize
+        }
+
+        eraserSize={eraserSize}
+        setEraserSize={
+          setEraserSize
+        }
+
+        selectedShape={
+          selectedShape
+        }
+
+        setSelectedShape={
+          setSelectedShape
+        }
+
+        onToggleNotes={
+          toggleNotes
+        }
+      />
+
+    </div>
+  );
 }
 
-export default App
+export default App;
