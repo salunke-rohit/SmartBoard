@@ -366,6 +366,8 @@ function App() {
   return (
     <div className="smartboard">
 
+      // board component is declared hear
+      
       <Board
         activeTool={activeTool}
         penType={penType}
@@ -445,3 +447,4 @@ function App() {
 }
 
 export default App;
+
